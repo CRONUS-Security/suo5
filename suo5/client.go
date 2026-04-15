@@ -427,9 +427,9 @@ func NewRawHttpClient(upstreamProxies []string, dialTimeout, timeout time.Durati
 			uTlsConn := utls.UClient(conn, &utls.Config{
 				InsecureSkipVerify: true,
 				ServerName:         hostname,
-				MinVersion:         utls.VersionTLS10,
+				MinVersion:         utls.VersionTLS12,
 				Renegotiation:      utls.RenegotiateOnceAsClient,
-			}, utls.HelloRandomizedNoALPN)
+			}, utls.HelloChrome_Auto)
 			if err := uTlsConn.Handshake(); err != nil {
 				_ = conn.Close()
 				return nil, err
@@ -448,7 +448,7 @@ func NewHttpTransport(upstreamProxies []string, timeout time.Duration) (*http.Tr
 
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			MinVersion:         tls.VersionTLS10,
+			MinVersion:         tls.VersionTLS12,
 			Renegotiation:      tls.RenegotiateOnceAsClient,
 			InsecureSkipVerify: true,
 		},
@@ -471,9 +471,9 @@ func NewHttpTransport(upstreamProxies []string, timeout time.Duration) (*http.Tr
 				ServerName:         hostname,
 				InsecureSkipVerify: true,
 				Renegotiation:      utls.RenegotiateOnceAsClient,
-				MinVersion:         utls.VersionTLS10,
+				MinVersion:         utls.VersionTLS12,
 			}
-			uTlsConn := utls.UClient(conn, tlsConfig, utls.HelloRandomizedNoALPN)
+			uTlsConn := utls.UClient(conn, tlsConfig, utls.HelloChrome_Auto)
 			if err = uTlsConn.HandshakeContext(ctx); err != nil {
 				_ = conn.Close()
 				return nil, err
