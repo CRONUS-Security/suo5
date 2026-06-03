@@ -947,7 +947,7 @@
 
         while (true)
         {
-            byte[] data = readQueue.Poll();
+            byte[] data = (written == 0) ? readQueue.Dequeue(100) : readQueue.Poll();
             if (data != null)
             {
                 written += data.Length;

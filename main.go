@@ -143,6 +143,11 @@ func main() {
 			Usage:   "disable browser headers, which will not send Accept, Accept-Encoding, etc.",
 			Value:   !defaultConfig.ImpersonateBrowser,
 		},
+		&cli.BoolFlag{
+			Name:  "no-tls",
+			Usage: "disable TLS, force plain HTTP even if the target URL uses https://",
+			Value: defaultConfig.NoTLS,
+		},
 		&cli.StringFlag{
 			Name:    "test-exit",
 			Aliases: []string{"T"},
@@ -203,6 +208,7 @@ func Action(c *cli.Context) error {
 	noHeartbeat := c.Bool("no-heartbeat")
 	noGzip := c.Bool("no-gzip")
 	noBrowserHeaders := c.Bool("no-browser-headers")
+	noTLS := c.Bool("no-tls")
 	jar := c.Bool("jar")
 	testExit := c.String("test-exit")
 	exclude := c.StringSlice("exclude-domain")
@@ -266,6 +272,7 @@ func Action(c *cli.Context) error {
 
 		ClassicPollInterval: classicInterval,
 		ImpersonateBrowser:  !noBrowserHeaders,
+		NoTLS:               noTLS,
 	}
 
 	if configFile != "" {

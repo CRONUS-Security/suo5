@@ -9,16 +9,22 @@
 
         private InputStream gInStream;
         private OutputStream gOutStream;
+        private HttpServletResponse gResp;
         private String gtunId;
         private int mode = 0;
 
         public Suo5() {
         }
 
-        public Suo5(InputStream in, OutputStream out, String tunId) {
+        public Suo5(InputStream in, OutputStream out, String tunId, HttpServletResponse resp) {
             this.gInStream = in;
             this.gOutStream = out;
             this.gtunId = tunId;
+            this.gResp = resp;
+        }
+
+        public Suo5(InputStream in, OutputStream out, String tunId) {
+            this(in, out, tunId, null);
         }
 
         public Suo5(String tunId, int mode) {
@@ -292,7 +298,7 @@
             final OutputStream respOutputStream = resp.getOutputStream();
 
             try {
-                Suo5 p = new Suo5(scInStream, respOutputStream, tunId);
+                Suo5 p = new Suo5(scInStream, respOutputStream, tunId, resp);
                 t = new Thread(p);
                 t.start();
 
@@ -511,7 +517,9 @@
             int maxSize = 512 * 1024; // 1MB
             int written = 0;
             while (true) {
-                byte[] data = readQueue.poll();
+                byte[] data = (written == 0)
+                    ? readQueue.poll(100, TimeUnit.MILLISECONDS)
+                    : readQueue.poll();
                 if (data != null) {
                     written += data.length;
                     baos.write(marshalBase64(newData(tunId, data)));
@@ -981,7 +989,7 @@
             // full stream
             if (this.mode == 0) {
                 try {
-                    pipeStream(gInStream, gOutStream, null, true);
+                    pipeStream(gInStream, gOutStream, gResp, true);
                 } catch (Exception ignore) {
                 }
                 return;

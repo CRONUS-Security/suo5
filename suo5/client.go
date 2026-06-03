@@ -44,6 +44,10 @@ func Connect(ctx context.Context, config *Suo5Config) (*Suo5Client, error) {
 	}
 	log.Infof("connecting to target: %s", config.GetTarget())
 
+	if config.NoTLS && strings.HasPrefix(config.Target, "https://") {
+		log.Warnf("no-tls enabled: downgrading target from https to http")
+	}
+
 	if config.DisableGzip {
 		log.Infof("disabling gzip")
 		config.Header.Set("Accept-Encoding", "identity")
