@@ -46,6 +46,7 @@ type Suo5Config struct {
 
 	ClassicPollInterval int  `json:"classic_poll_interval"`
 	ImpersonateBrowser  bool `json:"impersonate_browser"`
+	NoTLS               bool `json:"no_tls"`
 
 	SessionId               string                               `json:"-"`
 	TestExit                string                               `json:"-"`
@@ -210,6 +211,9 @@ func (conf *Suo5Config) NewRequest(ctx context.Context, body io.Reader, contentL
 
 func (conf *Suo5Config) GetTarget() string {
 	target := conf.Target
+	if conf.NoTLS && strings.HasPrefix(target, "https://") {
+		target = "http://" + target[len("https://"):]
+	}
 	if strings.Contains(target, "{rand}") {
 		target = strings.ReplaceAll(target, "{rand}", tpl.RandWord())
 	}
