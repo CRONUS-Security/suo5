@@ -1,6 +1,8 @@
 module changeme
 
-go 1.20
+go 1.21
+
+toolchain go1.24.13
 
 replace github.com/gorilla/websocket v1.5.3 => github.com/zema1/websocket v0.0.0-20240728051525-7fc49edb27c2
 
