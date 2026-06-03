@@ -33,7 +33,7 @@ func helloChromeNoALPN() utls.ClientHelloSpec {
 		Extensions: []utls.TLSExtension{
 			&utls.UtlsGREASEExtension{},
 			&utls.SNIExtension{},
-			&utls.UtlsExtendedMasterSecretExtension{},
+			&utls.ExtendedMasterSecretExtension{},
 			&utls.RenegotiationInfoExtension{Renegotiation: utls.RenegotiateOnceAsClient},
 			&utls.SupportedCurvesExtension{Curves: []utls.CurveID{
 				utls.GREASE_PLACEHOLDER,
