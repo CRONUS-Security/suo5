@@ -129,7 +129,9 @@ jobs:
         run: |
           rm -rf suo5-amd64-installer.exe
           rm -rf suo5.pkg
-          mv suo5.app.zip suo5-gui-darwin.app.zip
+          if [ -f suo5.app.zip ]; then
+            mv suo5.app.zip suo5-gui-darwin.app.zip
+          fi
       - run: ls -al target && ls -R target/ && file target/
       - uses: actions/upload-artifact@v4
         with:
